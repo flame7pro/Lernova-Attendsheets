@@ -140,6 +140,33 @@ class ContactRequest(BaseModel):
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
 
+class ClassCreate(BaseModel):
+    class_id: str
+    name: str
+    thresholds: Dict[str, float] = {}
+    custom_columns: List[Dict] = []
+
+class StudentCreate(BaseModel):
+    student_id: str
+    email: str
+    name: str
+    password_hash: str
+    roll_no: str = ""
+
+class EnrollmentCreate(BaseModel):
+    class_id: str
+    student_id: str
+    student_record_id: int
+    extra: Dict[str, Any] = {}
+
+class QRStart(BaseModel):
+    class_id: str
+    attendance_date: str
+
+class QRScan(BaseModel):
+    class_id: str
+    qr_code: str
+
 # ==================== HELPER FUNCTIONS ====================
 
 def get_password_hash(password: str) -> str:
@@ -835,6 +862,12 @@ async def delete_account(email: str = Depends(verify_token)):
 
 # ==================== STUDENT AUTH ENDPOINTS ====================
 
+@app.post("/students")
+async def create_student_endpoint(student_data: StudentCreate, user: dict = Depends(get_current_user)):
+    created_student = db.create_student(student_data.student_id, student_data.email, student_data.name, student_data.password_hash, student_data.roll_no)
+    return {"success": True, "student": created_student}
+
+
 @app.post("/auth/student/signup")
 async def student_signup(request: SignupRequest):
     """Sign up a new student"""
@@ -1019,6 +1052,11 @@ async def delete_student_account(email: str = Depends(verify_token)):
         )
 
 # ==================== STUDENT ENROLLMENT ENDPOINTS ====================
+
+@app.post("/enroll")
+async def enroll_student_endpoint(enrollment_data: EnrollmentCreate, user: dict = Depends(get_current_user)):
+    enrollment = db.enroll_student(enrollment_data.class_id, enrollment_data.student_id, enrollment_data.student_record_id, enrollment_data.extra)
+    return {"success": True, "enrollment": enrollment}
 
 @app.post("/student/enroll")
 async def enroll_in_class(request: StudentEnrollmentRequest, email: str = Depends(verify_token)):
@@ -1222,15 +1260,10 @@ async def verify_class_exists(class_id: str):
 
 # ==================== CLASS ENDPOINTS ====================
 
-@app.get("/classes")
-async def get_classes(email: str = Depends(verify_token)):
-    """Get all classes for the current user"""
-    user = db.get_user_by_email(email)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    classes = db.get_all_classes(user["id"])
-    return {"classes": classes}
+@app.post("/classes")
+async def create_class_endpoint(class_data: ClassCreate, user: dict = Depends(get_current_user)):
+    created_class = db.create_class(teacher_id=user["id"], class_id=class_data.class_id, name=class_data.name, thresholds=class_data.thresholds, custom_columns=class_data.custom_columns)
+    return {"success": True, "class": created_class}
 
 
 @app.post("/classes")
@@ -1430,6 +1463,11 @@ async def submit_contact(request: ContactRequest):
     
 # ==================== QR CODE ATTENDANCE ENDPOINTS ====================
 
+@app.post("/qr/start")
+async def start_qr_session(qr_data: QRStart, user: dict = Depends(get_current_user)):
+    session = db.create_qr_session(qr_data.class_id, user["id"], qr_data.attendance_date)
+    return {"success": True, "session": session}
+
 @app.post("/qr/start-session")
 async def start_qr_session(request: dict, email: str = Depends(verify_token)):
     class_id = request.get("class_id")
@@ -1443,6 +1481,13 @@ async def start_qr_session(request: dict, email: str = Depends(verify_token)):
     
     session = db.start_qr_session(class_id, user["id"], rotation_interval)
     return {"success": True, "session": session}
+
+@app.get("/qr/{class_id}")
+async def get_qr_code(class_id: str):
+    session = db.get_qr_session(class_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="No active QR session")
+    return {"qr_code": session["current_code"]}
 
 @app.get("/qr/session/{class_id}")
 async def get_qr_session(class_id: str, email: str = Depends(verify_token)):
@@ -1485,6 +1530,10 @@ async def scan_qr_code(
             detail="Failed to scan QR code"
         )
 
+@app.post("/qr/scan")
+async def scan_qr_endpoint(scan_data: QRScan, user: dict = Depends(get_current_student)):
+    result = db.scan_qr_code(user["id"], scan_data.class_id, scan_data.qr_code)
+    return result
 
 @app.post("/qr/stop-session")
 async def stop_qr_session(request: dict, email: str = Depends(verify_token)):
@@ -1511,6 +1560,10 @@ async def stop_qr_session(request: dict, email: str = Depends(verify_token)):
             detail="Failed to stop QR session"
         )
 
+@app.post("/qr/stop/{class_id}")
+async def stop_qr_session_endpoint(class_id: str, user: dict = Depends(get_current_user)):
+    result = db.stop_qr_session(class_id, user["id"])
+    return result
 
 # ==================== HEALTH CHECK ====================
 
