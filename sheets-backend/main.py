@@ -21,19 +21,28 @@ load_dotenv()
 
 app = FastAPI(title="Lernova Attendsheets API")
 
-# For development/preview: allow all .vercel.app (or be more strict)
+# CORS - permissive for development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://lernova-attendsheets-m5hp.vercel.app",
-        "https://lernova-attendsheets-m5hp-62syamlbo-nabeels-projects-bba4dd9d.vercel.app",
-        "https://lernova-attendsheets-m5hp-git-main-nabeels-projects-bba4dd9d.vercel.app",
-        "http://localhost:3000",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=False,  # MUST be False with wildcard
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# For development/preview: allow all .vercel.app (or be more strict)
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=[
+#         "https://lernova-attendsheets-m5hp.vercel.app",
+#         "https://lernova-attendsheets-m5hp-62syamlbo-nabeels-projects-bba4dd9d.vercel.app",
+#         "https://lernova-attendsheets-m5hp-git-main-nabeels-projects-bba4dd9d.vercel.app",
+#         "http://localhost:3000",
+#     ],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 # Initialize Database Manager
 db = DatabaseManager(base_dir="data")
