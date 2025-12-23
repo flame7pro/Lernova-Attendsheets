@@ -45,7 +45,7 @@ app.add_middleware(
 # )
 
 # Initialize Database Manager
-db = DatabaseManager(base_dir="data")
+db = DatabaseManager()
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
