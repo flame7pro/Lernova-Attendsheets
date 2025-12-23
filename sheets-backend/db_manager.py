@@ -630,7 +630,7 @@ class DatabaseManager:
             return []
 
     def get_qr_sessions_dir(self) -> str:
-    return os.path.join(self.base_dir, "qr_sessions")
+        return os.path.join(self.base_dir, "qr_sessions")
 
     def ensure_qr_sessions_dir(self):
         os.makedirs(self.get_qr_sessions_dir(), exist_ok=True)
