@@ -3,6 +3,58 @@ import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import shutil
+# ===== Supabase Postgres + SQLAlchemy setup =====
+from sqlalchemy import create_engine, Column, String, DateTime, JSON
+from sqlalchemy.orm import sessionmaker, declarative_base, Session
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL env var is not set")
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    name = Column(String, nullable=False)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, nullable=False)  # "teacher" or "student"
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Student(Base):
+    __tablename__ = "students"
+
+    id = Column(String, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    name = Column(String, nullable=False)
+    password_hash = Column(String, nullable=False)
+    roll_no = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Class(Base):
+    __tablename__ = "classes"
+
+    id = Column(String, primary_key=True, index=True)
+    teacher_id = Column(String, index=True, nullable=False)
+    name = Column(String, nullable=False)
+    students = Column(JSON, default=list)
+    custom_columns = Column(JSON, default=list)
+    thresholds = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+# =================================================
+
 
 class DatabaseManager:
     """Manages file-based database operations with student support"""
@@ -14,6 +66,9 @@ class DatabaseManager:
         self.contact_dir = os.path.join(base_dir, "contact")
         self.enrollments_dir = os.path.join(base_dir, "enrollments")
         self._ensure_directories()
+        
+        # SQLAlchemy session factory for Supabase
+        self._SessionLocal = SessionLocal
     
     def _ensure_directories(self):
         """Ensure all base directories exist"""
@@ -151,7 +206,7 @@ class DatabaseManager:
             "success": True,
             "message": "Attendance marked as Present",
             "date": attendance_date,
-    }
+        }
 
 
     def stop_qr_session(self, class_id: str, teacher_id: str) -> Dict[str, Any]:
@@ -201,7 +256,6 @@ class DatabaseManager:
                     marked_absent += 1
 
         # 4) Save updated class
-        # use the same helper as update_class: get_class_file
         teacher_in_class = class_data.get("teacher_id")
         class_file = self.get_class_file(teacher_in_class, class_id)
         self.write_json(class_file, class_data)
@@ -220,29 +274,31 @@ class DatabaseManager:
 
     # ==================== USER OPERATIONS ====================
     
-    def create_user(self, user_id: str, email: str, name: str, password_hash: str) -> Dict[str, Any]:
-        """Create a new user with directory structure"""
-        user_dir = self.get_user_dir(user_id)
-        classes_dir = self.get_user_classes_dir(user_id)
-        os.makedirs(classes_dir, exist_ok=True)
-        
-        user_data = {
-            "id": user_id,
-            "email": email,
-            "name": name,
-            "password": password_hash,
-            "created_at": datetime.utcnow().isoformat(),
-            "verified": True,
-            "role": "teacher",
-            "overview": {
-                "total_classes": 0,
-                "total_students": 0,
-                "last_updated": datetime.utcnow().isoformat()
+    def create_user(self, user_id: str, email: str, name: str, password_hash: str, role: str = "teacher") -> Dict[str, Any]:
+        """
+        Create teacher user in Supabase and return same dict structure as before.
+        """
+        db: Session = self._SessionLocal()
+        try:
+            user = User(
+                id=user_id,
+                email=email,
+                name=name,
+                password_hash=password_hash,
+                role=role,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            return {
+                "id": user.id,
+                "email": user.email,
+                "name": user.name,
+                "password": user.password_hash,
+                "role": user.role,
             }
-        }
-        
-        self.write_json(self.get_user_file(user_id), user_data)
-        return user_data
+        finally:
+            db.close()
     
     def create_student(self, student_id: str, email: str, name: str, password_hash: str) -> Dict[str, Any]:
         """Create a new student user"""
@@ -265,23 +321,45 @@ class DatabaseManager:
     
     def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Get user data"""
-        return self.read_json(self.get_user_file(user_id))
+        db: Session = self._SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user:
+                return None
+            return {
+                "id": user.id,
+                "email": user.email,
+                "name": user.name,
+                "password": user.password_hash,
+                "role": user.role,
+            }
+        finally:
+            db.close()
     
     def get_student(self, student_id: str) -> Optional[Dict[str, Any]]:
         """Get student data"""
         return self.read_json(self.get_student_file(student_id))
     
     def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
-        """Get user by email (searches all users - teachers)"""
-        if not os.path.exists(self.users_dir):
-            return None
-        
-        for user_id in os.listdir(self.users_dir):
-            user_file = self.get_user_file(user_id)
-            user_data = self.read_json(user_file)
-            if user_data and user_data.get("email") == email:
-                return user_data
-        return None
+        """
+        Return teacher user dict or None.
+        Must match what main.py expects:
+        { "id": str, "email": str, "name": str, "password": str, "role": str }
+        """
+        db: Session = self._SessionLocal()
+        try:
+            user = db.query(User).filter(User.email == email).first()
+            if not user:
+                return None
+            return {
+                "id": user.id,
+                "email": user.email,
+                "name": user.name,
+                "password": user.password_hash,
+                "role": user.role,
+            }
+        finally:
+            db.close()
     
     def get_student_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         """Get student by email"""
@@ -319,35 +397,16 @@ class DatabaseManager:
     
     def delete_user(self, user_id: str) -> bool:
         """Delete user and all associated data"""
-        user_dir = self.get_user_dir(user_id)
-        if not os.path.exists(user_dir):
-            return False
-        
+        db: Session = self._SessionLocal()
         try:
-            classes = self.get_all_classes(user_id)
-            for cls in classes:
-                class_id = str(cls.get("id"))
-                enrollment_file = self.get_enrollment_file(class_id)
-                if os.path.exists(enrollment_file):
-                    enrollments = self.read_json(enrollment_file) or []
-                    for enrollment in enrollments:
-                        student_id = enrollment.get("student_id")
-                        if student_id:
-                            try:
-                                student_data = self.get_student(student_id)
-                                if student_data:
-                                    enrolled_classes = student_data.get("enrolled_classes", [])
-                                    enrolled_classes = [ec for ec in enrolled_classes if ec.get("class_id") != class_id]
-                                    self.update_student(student_id, {"enrolled_classes": enrolled_classes})
-                            except Exception as e:
-                                print(f"Error updating student {student_id} during teacher deletion: {e}")
-                    os.remove(enrollment_file)
-            
-            shutil.rmtree(user_dir)
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user:
+                return False
+            db.delete(user)
+            db.commit()
             return True
-        except Exception as e:
-            print(f"Error deleting user {user_id}: {e}")
-            return False
+        finally:
+            db.close()
     
     def delete_student(self, student_id: str) -> bool:
         """Delete student account and all their data, clean up enrollments"""
