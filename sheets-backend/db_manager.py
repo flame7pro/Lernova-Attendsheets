@@ -14,6 +14,26 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+def read_json(self, file_path: str) -> Optional[Dict[Any, Any]]:
+    """Read JSON file safely"""
+    try:
+        if not os.path.exists(file_path):
+            return None
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error reading {file_path}: {e}")
+        return None
+
+def write_json(self, file_path: str, data: Dict[Any, Any]):
+    """Write JSON file safely"""
+    try:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error writing {file_path}: {e}")
+        raise
 
 class DatabaseManager:
     """
@@ -94,7 +114,7 @@ class DatabaseManager:
         user_data.update(updates)
         user_data["updated_at"] = datetime.utcnow().isoformat()
         self.write_json(self.get_user_file(user_id), user_data)
-        return user_dataFalse
+        return user_data
     
     def delete_user(self, user_id: str) -> bool:
         """Delete user and cascade delete related data"""
@@ -608,6 +628,16 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error getting QR sessions: {e}")
             return []
+
+    def get_qr_sessions_dir(self) -> str:
+    return os.path.join(self.base_dir, "qr_sessions")
+
+    def ensure_qr_sessions_dir(self):
+        os.makedirs(self.get_qr_sessions_dir(), exist_ok=True)
+    
+    def get_qr_session_file(self, class_id: str) -> str:
+        self.ensure_qr_sessions_dir()
+        return os.path.join(self.base_dir, "qr_sessions", f"class_{class_id}.json")
     
     # ==================== CONTACT MESSAGE OPERATIONS ====================
     
