@@ -26,13 +26,6 @@ db = DatabaseManager(base_dir="data")
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
-# Allow production + all preview deployments
-allowed_origins = [
-    FRONTEND_URL,  # production
-    "https://lernova-attendsheets-m5hp.vercel.app",
-    "https://lernova-attendsheets-m5hp-nabeels-projects-bba4dd9d.vercel.app/",
-]
-
 # For development/preview: allow all .vercel.app (or be more strict)
 app.add_middleware(
     CORSMiddleware,
