@@ -1,0 +1,14 @@
+# Backend env
+sheets-backend/.env
+sheets-backend/.env.*
+
+# Root env
+.env
+.env.*
+
+# Python
+sheets-backend/__pycache__/
+sheets-backend/venv/
+
+# Node
+sheets-frontend/node_modules/

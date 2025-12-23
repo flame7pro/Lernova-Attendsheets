@@ -24,14 +24,17 @@ app = FastAPI(title="Lernova Attendsheets API")
 # Initialize Database Manager
 db = DatabaseManager(base_dir="data")
 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=[FRONTEND_URL],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Security
 security = HTTPBearer()
