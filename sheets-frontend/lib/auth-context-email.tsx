@@ -107,39 +107,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const verifyEmail = async (email: string, code: string) => {
-    try {
-      // Get the role from pending signup
-      const pendingRole = typeof window !== 'undefined' ? localStorage.getItem('pendingsignuprole') : null;
-      const role = pendingRole || 'teacher';
-      
-      const endpoint = role === 'student' ? 'auth/student/verify-email' : 'auth/verify-email';
+  try {
+    // Get the role from pending signup
+    const pendingRole =
+      typeof window !== "undefined"
+        ? localStorage.getItem("pendingsignuprole")
+        : null;
+    const role = pendingRole || "teacher";
 
-      const response = await apiCall(endpoint, {
-        method: 'POST',
-        body: JSON.stringify({ email, code }),
-      });
+    const endpoint =
+      role === "student"
+        ? "auth/student/verify-email"
+        : "auth/verify-email";
 
-      // Add role to user object if not present
-      const userData = { ...response.user, role: response.user.role || role };
+    const response = await apiCall(endpoint, {
+      method: "POST",
+      body: JSON.stringify({ email, code }),
+    });
 
-      localStorage.setItem('accesstoken', response.accesstoken);
-      localStorage.setItem('user', JSON.stringify(userData));
-      localStorage.setItem('userrole', userData.role);
+    // Add role to user object if not present
+    const userData = { ...response.user, role: response.user.role || role };
 
-      // Clear pending role
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('pendingsignuprole');
-      }
+    // NOTE: backend field is access_token, we store it under accesstoken
+    localStorage.setItem("accesstoken", response.access_token);
+    localStorage.setItem("user", JSON.stringify(userData));
+    localStorage.setItem("userrole", userData.role);
 
-      setToken(response.accesstoken);
-      setUser(userData);
-
-      return { success: true, message: 'Email verified successfully' };
-    } catch (error: any) {
-      return { success: false, message: error.message || 'Verification failed' };
+    // Clear pending role
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("pendingsignuprole");
     }
-  };
 
+    setToken(response.access_token);
+    setUser(userData);
+
+    // Redirect after successful verification
+    if (typeof window !== "undefined") {
+      window.location.href = "/dashboard";
+    }
+
+    return { success: true, message: "Email verified successfully" };
+  } catch (error: any) {
+    return { success: false, message: error.message || "Verification failed" };
+  }
+    
   const login = async (email: string, password: string) => {
     try {
       // Try teacher login first
@@ -171,11 +182,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Add role to user object
       const userData = { ...response.user, role };
 
-      localStorage.setItem('accesstoken', response.accesstoken);
+      localStorage.setItem('accesstoken', response.access_token);
       localStorage.setItem('user', JSON.stringify(userData));
       localStorage.setItem('userrole', role);
 
-      setToken(response.accesstoken);
+      setToken(response.access_token);
       setUser(userData);
 
       return { success: true, message: 'Login successful', role: role, user: userData };
