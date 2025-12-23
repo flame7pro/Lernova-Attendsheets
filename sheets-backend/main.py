@@ -34,13 +34,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Handle OPTIONS preflight requests
-from fastapi import Request
-
-@app.options("/{full_path:path}")
-async def options_handler(request: Request):
-    return {}
-
 # Initialize Database Manager
 db = DatabaseManager(base_dir="data")
 
