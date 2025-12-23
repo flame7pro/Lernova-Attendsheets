@@ -21,11 +21,6 @@ load_dotenv()
 
 app = FastAPI(title="Lernova Attendsheets API")
 
-# Initialize Database Manager
-db = DatabaseManager(base_dir="data")
-
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-
 # For development/preview: allow all .vercel.app (or be more strict)
 app.add_middleware(
     CORSMiddleware,
@@ -35,6 +30,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialize Database Manager
+db = DatabaseManager(base_dir="data")
+
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 # Security
 security = HTTPBearer()
