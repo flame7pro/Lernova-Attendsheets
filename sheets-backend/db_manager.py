@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from supabase import create_client, Client
 import random
 import string
+from pydantic import BaseModel
 
 # ===== Supabase Client Setup =====
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -13,27 +14,6 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-def read_json(self, file_path: str) -> Optional[Dict[Any, Any]]:
-    """Read JSON file safely"""
-    try:
-        if not os.path.exists(file_path):
-            return None
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Error reading {file_path}: {e}")
-        return None
-
-def write_json(self, file_path: str, data: Dict[Any, Any]):
-    """Write JSON file safely"""
-    try:
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"Error writing {file_path}: {e}")
-        raise
 
 class DatabaseManager:
     """
@@ -592,16 +572,6 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error getting QR sessions: {e}")
             return []
-
-    def get_qr_sessions_dir(self) -> str:
-        return os.path.join(self.base_dir, "qr_sessions")
-
-    def ensure_qr_sessions_dir(self):
-        os.makedirs(self.get_qr_sessions_dir(), exist_ok=True)
-    
-    def get_qr_session_file(self, class_id: str) -> str:
-        self.ensure_qr_sessions_dir()
-        return os.path.join(self.base_dir, "qr_sessions", f"class_{class_id}.json")
     
     # ==================== CONTACT MESSAGE OPERATIONS ====================
     
