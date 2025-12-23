@@ -24,7 +24,7 @@ app = FastAPI(title="Lernova Attendsheets API")
 # For development/preview: allow all .vercel.app (or be more strict)
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
