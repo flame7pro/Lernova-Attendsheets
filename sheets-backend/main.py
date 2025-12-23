@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
-import json
 import os
 from datetime import datetime, timedelta
 import jwt
@@ -15,68 +14,48 @@ import random
 import string
 from dotenv import load_dotenv
 import ssl
-from db_manager import DatabaseManager
+
+from db_manager import DatabaseManager  # <-- Supabase manager
 
 load_dotenv()
 
 app = FastAPI(title="Lernova Attendsheets API")
 
-# CORS - permissive for development
+# ============= CORS =============
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
-    allow_credentials=False,  # MUST be False with wildcard
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# For development/preview: allow all .vercel.app (or be more strict)
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=[
-#         "https://lernova-attendsheets-m5hp.vercel.app",
-#         "https://lernova-attendsheets-m5hp-62syamlbo-nabeels-projects-bba4dd9d.vercel.app",
-#         "https://lernova-attendsheets-m5hp-git-main-nabeels-projects-bba4dd9d.vercel.app",
-#         "http://localhost:3000",
-#     ],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-# Initialize Database Manager
+# ============= DB + CONFIG =============
 db = DatabaseManager()
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
-# Security
 security = HTTPBearer()
-
-# Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
-# Email Configuration
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 FROM_EMAIL = os.getenv("FROM_EMAIL", SMTP_USERNAME)
 
-# Temporary storage for verification codes (in production, use Redis or similar)
-verification_codes = {}
-password_reset_codes = {}
+verification_codes: Dict[str, str] = {}
+password_reset_codes: Dict[str, str] = {}
 
-
-# ==================== PYDANTIC MODELS ====================
+# ============= MODELS =============
 
 class SignupRequest(BaseModel):
     email: EmailStr
     password: str
     name: str
-    role: str = "teacher" 
-
+    role: str = "teacher"
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -92,36 +71,29 @@ class VerifyEmailRequest(BaseModel):
     email: EmailStr
     code: str
 
-
 class PasswordResetRequest(BaseModel):
     email: EmailStr
-
 
 class VerifyResetCodeRequest(BaseModel):
     email: EmailStr
     code: str
     new_password: str
 
-
 class UpdateProfileRequest(BaseModel):
     name: str
-
 
 class ChangePasswordRequest(BaseModel):
     code: str
     new_password: str
-
 
 class UserResponse(BaseModel):
     id: str
     email: str
     name: str
 
-
 class TokenResponse(BaseModel):
     access_token: str
     user: UserResponse
-
 
 class ClassRequest(BaseModel):
     id: int
@@ -129,7 +101,6 @@ class ClassRequest(BaseModel):
     students: List[Dict[str, Any]]
     customColumns: List[Dict[str, Any]]
     thresholds: Optional[Dict[str, Any]] = None
-
 
 class ContactRequest(BaseModel):
     name: str
@@ -140,18 +111,12 @@ class ContactRequest(BaseModel):
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
 
+# NEW MODELS FOR SUPABASE CLASSES/QR
 class ClassCreate(BaseModel):
     class_id: str
     name: str
     thresholds: Dict[str, float] = {}
-    custom_columns: List[Dict] = []
-
-class StudentCreate(BaseModel):
-    student_id: str
-    email: str
-    name: str
-    password_hash: str
-    roll_no: str = ""
+    custom_columns: List[Dict[str, Any]] = []
 
 class EnrollmentCreate(BaseModel):
     class_id: str
@@ -1054,173 +1019,200 @@ async def delete_student_account(email: str = Depends(verify_token)):
 # ==================== STUDENT ENROLLMENT ENDPOINTS ====================
 
 @app.post("/enroll")
-async def enroll_student_endpoint(enrollment_data: EnrollmentCreate, user: dict = Depends(get_current_user)):
-    enrollment = db.enroll_student(enrollment_data.class_id, enrollment_data.student_id, enrollment_data.student_record_id, enrollment_data.extra)
+async def enroll_student_endpoint(
+    enrollment_data: EnrollmentCreate,
+    email: str = Depends(verify_token),
+):
+    """Teacher enrolls a student in a class by IDs"""
+    # Optional: ensure teacher exists (for security/logging)
+    teacher = db.get_user_by_email(email)
+    if not teacher:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    enrollment = db.enroll_student(
+        class_id=enrollment_data.class_id,
+        student_id=enrollment_data.student_id,
+        student_record_id=enrollment_data.student_record_id,
+        extra=enrollment_data.extra,
+    )
     return {"success": True, "enrollment": enrollment}
 
 @app.post("/student/enroll")
-async def enroll_in_class(request: StudentEnrollmentRequest, email: str = Depends(verify_token)):
-    """Enroll student in a class"""
+async def enroll_in_class(
+    request: StudentEnrollmentRequest,
+    email: str = Depends(verify_token),
+):
+    """Enroll logged-in student in a class (Supabase-backed)"""
     try:
-        # Get student data
+        # Get student row
         student = db.get_student_by_email(email)
         if not student:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
-        
-        student_id = student['id']
-        
-        # SECURITY: Ensure the email in request matches logged-in user
+
+        student_id = student["id"]
+
+        # Security: request.email must match token email
         if request.email != email:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You must use your registered email"
+                detail="You must use your registered email",
             )
-        
-        # Prepare student info
-        student_info = {
+
+        # Check class exists
+        class_data = db.get_class_by_id(request.class_id)
+        if not class_data:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Class not found")
+
+        # Check if already actively enrolled
+        existing = db.get_enrollment(request.class_id, student_id)
+        if existing and existing.get("status") == "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You are already enrolled in this class",
+            )
+
+        # Prepare extra info (name/roll/email)
+        extra = {
             "name": request.name,
             "rollNo": request.rollNo,
-            "email": request.email
+            "email": request.email,
         }
-        
-        # Enroll student - this handles re-enrollment with data preservation
-        enrollment = db.enroll_student(student_id, request.class_id, student_info)
-        
+
+        # Generate a student_record_id (simple timestamp-based)
+        student_record_id = int(datetime.utcnow().timestamp() * 1000)
+
+        enrollment = db.enroll_student(
+            class_id=request.class_id,
+            student_id=student_id,
+            student_record_id=student_record_id,
+            extra=extra,
+        )
+
         return {
             "success": True,
-            "message": enrollment.get("message", "Successfully enrolled in class"),
-            "enrollment": enrollment
+            "message": "Successfully enrolled in class",
+            "enrollment": enrollment,
         }
-        
-    except ValueError as e:
-        error_message = str(e)
-        print(f"[ENROLL_ENDPOINT] ValueError: {error_message}")
-        
-        if "already enrolled" in error_message.lower():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_message)
-        else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_message)
-            
+
     except HTTPException:
         raise
     except Exception as e:
         print(f"[ENROLL_ENDPOINT] ERROR: {e}")
-        import traceback
-        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to enroll in class"
+            detail="Failed to enroll in class",
         )
-    
-    
+
 @app.delete("/student/unenroll/{class_id}")
-async def unenroll_from_class(class_id: str, email: str = Depends(verify_token)):
-    """Unenroll student from a class"""
+async def unenroll_from_class(
+    class_id: str,
+    email: str = Depends(verify_token),
+):
+    """Unenroll student from a class (set enrollment status='inactive')"""
     try:
-        # Get student data
         student = db.get_student_by_email(email)
         if not student:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Student not found"
-            )
-        
-        # Verify class exists
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+
+        student_id = student["id"]
+
+        # Check class exists
         class_data = db.get_class_by_id(class_id)
         if not class_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Class not found"
-            )
-        
-        # Unenroll student
-        success = db.unenroll_student(student["id"], class_id)
-        
-        if not success:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Class not found")
+
+        # Check active enrollment
+        enrollment = db.get_enrollment(class_id, student_id)
+        if not enrollment or enrollment.get("status") != "active":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You are not enrolled in this class"
+                detail="You are not actively enrolled in this class",
             )
-        
+
+        ok = db.update_enrollment_status(class_id, student_id, status="inactive")
+        if not ok:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to unenroll from class",
+            )
+
         return {
             "success": True,
-            "message": "Successfully unenrolled from class"
+            "message": "Successfully unenrolled from class",
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         print(f"Unenrollment error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to unenroll from class: {str(e)}"
+            detail=f"Failed to unenroll from class: {str(e)}",
         )
 
 @app.get("/student/classes")
 async def get_student_classes(email: str = Depends(verify_token)):
-    """Get all classes a student is enrolled in"""
+    """Get all classes a student is actively enrolled in"""
     try:
         student = db.get_student_by_email(email)
         if not student:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Student not found"
-            )
-        
-        enrolled_classes = db.get_student_enrollments(student["id"])
-        
-        # Get detailed info for each class
-        classes_details = []
-        for enrollment in enrolled_classes:
-            class_details = db.get_student_class_details(student["id"], enrollment["class_id"])
-            if class_details:
-                classes_details.append(class_details)
-        
-        return {
-            "classes": classes_details
-        }
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+
+        student_id = student["id"]
+
+        class_ids = db.get_student_enrollments(student_id)  # List[str]
+        classes = []
+        for cid in class_ids:
+            cls = db.get_class_by_id(cid)
+            if cls:
+                classes.append(cls)
+
+        return {"classes": classes}
+
     except HTTPException:
         raise
     except Exception as e:
         print(f"Error fetching student classes: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch classes"
+            detail="Failed to fetch classes",
         )
 
-
 @app.get("/student/class/{class_id}")
-async def get_student_class_detail(class_id: str, email: str = Depends(verify_token)):
-    """Get detailed information about a specific class"""
+async def get_student_class_detail(
+    class_id: str,
+    email: str = Depends(verify_token),
+):
+    """Get class details for a student, only if enrolled"""
     try:
         student = db.get_student_by_email(email)
         if not student:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+
+        student_id = student["id"]
+
+        # Ensure student has active enrollment
+        enrollment = db.get_enrollment(class_id, student_id)
+        if not enrollment or enrollment.get("status") != "active":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Student not found"
+                detail="Class not found or student not enrolled",
             )
-        
-        class_details = db.get_student_class_details(student["id"], class_id)
-        if not class_details:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Class not found or student not enrolled"
-            )
-        
-        return {
-            "class": class_details
-        }
-        
+
+        cls = db.get_class_by_id(class_id)
+        if not cls:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Class not found")
+
+        return {"class": cls}
+
     except HTTPException:
         raise
     except Exception as e:
         print(f"Error fetching class details: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch class details"
+            detail="Failed to fetch class details",
         )
-
 
 @app.get("/class/verify/{class_id}")
 async def verify_class_exists(class_id: str):
@@ -1228,196 +1220,75 @@ async def verify_class_exists(class_id: str):
     try:
         class_data = db.get_class_by_id(class_id)
         if not class_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Class not found"
-            )
-        
-        # Get teacher info
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Class not found")
+
         teacher_id = class_data.get("teacher_id")
         teacher_name = "Unknown"
         if teacher_id:
             teacher = db.get_user(teacher_id)
             if teacher:
                 teacher_name = teacher.get("name", "Unknown")
-        
+
         return {
             "exists": True,
             "class_name": class_data.get("name", ""),
             "teacher_name": teacher_name,
-            "class_id": class_id
+            "class_id": class_id,
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         print(f"Error verifying class: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to verify class"
+            detail="Failed to verify class",
         )
 
 
+
 # ==================== CLASS ENDPOINTS ====================
+@app.get("/classes")
+async def get_classes(email: str = Depends(verify_token)):
+    """Get all classes for the logged-in teacher"""
+    user = db.get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    classes = db.get_classes_by_teacher(user["id"])
+    return {"classes": classes}
+
+@app.get("/classes/{class_id}")
+async def get_class(class_id: str, email: str = Depends(verify_token)):
+    """Get a specific class by ID"""
+    user = db.get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    cls = db.get_class_by_id(class_id)
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    return {"class": cls}
 
 @app.post("/classes")
-async def create_class_endpoint(class_data: ClassCreate, user: dict = Depends(get_current_user)):
-    created_class = db.create_class(teacher_id=user["id"], class_id=class_data.class_id, name=class_data.name, thresholds=class_data.thresholds, custom_columns=class_data.custom_columns)
-    return {"success": True, "class": created_class}
-
-
-@app.post("/classes")
-async def create_class(class_data: ClassRequest, email: str = Depends(verify_token)):
+async def create_class_endpoint(
+    class_data: ClassCreate,
+    email: str = Depends(verify_token),
+):
     """Create a new class"""
     user = db.get_user_by_email(email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    created_class = db.create_class(user["id"], class_data.model_dump())
+
+    created_class = db.create_class(
+        class_id=class_data.class_id,
+        teacher_id=user["id"],
+        name=class_data.name,
+        thresholds=class_data.thresholds,
+        custom_columns=class_data.custom_columns,
+    )
     return {"success": True, "class": created_class}
-
-
-@app.get("/classes/{class_id}")
-async def get_class(class_id: str, email: str = Depends(verify_token)):
-    """Get a specific class"""
-    user = db.get_user_by_email(email)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    class_data = db.get_class(user["id"], class_id)
-    if not class_data:
-        raise HTTPException(status_code=404, detail="Class not found")
-    
-    return {"class": class_data}
-
-
-@app.put("/classes/{class_id}")
-async def update_class(class_id: str, class_data: ClassRequest, email: str = Depends(verify_token)):
-    """Update a class - handles student deletions AND preserves inactive student data"""
-    print(f"\n{'='*60}")
-    print(f"[UPDATE_CLASS] Starting update for class {class_id}")
-    print(f"{'='*60}")
-    
-    # Get user
-    user = db.get_user_by_email(email)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    user_id = user['id']
-    
-    # Get FULL current class data from FILE (RAW - not filtered)
-    class_file = db.get_class_file(user_id, class_id)
-    current_class = db.read_json(class_file)
-    
-    if not current_class:
-        raise HTTPException(status_code=404, detail="Class not found")
-    
-    all_students_in_file = current_class.get('students', [])
-    print(f"[UPDATE_CLASS] 📁 Students in FILE: {len(all_students_in_file)}")
-    for s in all_students_in_file:
-        attendance_count = len(s.get('attendance', {}))
-        print(f"  - ID: {s.get('id')}, Name: {s.get('name')}, Attendance: {attendance_count}")
-    
-    incoming_students = class_data.students
-    print(f"\n[UPDATE_CLASS] 📥 Students in REQUEST: {len(incoming_students)}")
-    for s in incoming_students:
-        attendance_count = len(s.get('attendance', {}))
-        print(f"  - ID: {s.get('id')}, Name: {s.get('name')}, Attendance: {attendance_count}")
-    
-    # Get current student IDs
-    current_student_ids = {s.get('id') for s in all_students_in_file}
-    new_student_ids = {s.get('id') for s in incoming_students}
-    
-    # Find deleted students
-    deleted_student_ids = current_student_ids - new_student_ids
-    
-    print(f"\n[UPDATE_CLASS] 🔍 Analysis:")
-    print(f"  - Current IDs: {current_student_ids}")
-    print(f"  - New IDs: {new_student_ids}")
-    print(f"  - Deleted IDs: {deleted_student_ids}")
-    
-    if deleted_student_ids:
-        print(f"\n[UPDATE_CLASS] ⚠️ Students DELETED by teacher: {deleted_student_ids}")
-        
-        # Mark deleted students as inactive in enrollments
-        enrollment_file = db.get_enrollment_file(class_id)
-        enrollments = db.read_json(enrollment_file) or []
-        
-        for enrollment in enrollments:
-            if enrollment.get('student_record_id') in deleted_student_ids:
-                old_status = enrollment.get('status')
-                enrollment['status'] = 'inactive'
-                enrollment['removed_by_teacher_at'] = datetime.utcnow().isoformat()
-                print(f"  - Marked enrollment {enrollment.get('student_record_id')} as inactive (was: {old_status})")
-                
-                # Update student's enrolled_classes
-                student_id = enrollment.get('student_id')
-                if student_id:
-                    try:
-                        student_data = db.get_student(student_id)
-                        if student_data:
-                            enrolled_classes = student_data.get('enrolled_classes', [])
-                            enrolled_classes = [ec for ec in enrolled_classes if ec.get('class_id') != class_id]
-                            db.update_student(student_id, {"enrolled_classes": enrolled_classes})
-                    except Exception as e:
-                        print(f"  - Error updating student {student_id}: {e}")
-        
-        db.write_json(enrollment_file, enrollments)
-    
-    # Build final student list
-    updated_students_map = {s.get('id'): s for s in incoming_students}
-    final_students = []
-    
-    print(f"\n[UPDATE_CLASS] 🔨 Building final student list:")
-    for student in all_students_in_file:
-        student_id = student.get('id')
-        
-        if student_id in updated_students_map:
-            # Active student - use updated data from request
-            updated = updated_students_map[student_id]
-            final_students.append(updated)
-            print(f"  ✓ Including ACTIVE: {student.get('name')} (ID: {student_id}) - Attendance: {len(updated.get('attendance', {}))}")
-        else:
-            # Inactive student - preserve from file
-            final_students.append(student)
-            print(f"  ✓ Preserving INACTIVE: {student.get('name')} (ID: {student_id}) - Attendance: {len(student.get('attendance', {}))}")
-    
-    print(f"\n[UPDATE_CLASS] 💾 Final count: {len(final_students)} total students")
-    print(f"  - Active: {len(incoming_students)}")
-    print(f"  - Inactive: {len(final_students) - len(incoming_students)}")
-    
-    # Update class data
-    updated_class_data = {
-        "id": class_data.id,
-        "name": class_data.name,
-        "students": final_students,  # ALL students
-        "customColumns": class_data.customColumns,
-        "thresholds": class_data.thresholds,
-        "teacher_id": user_id,
-        "created_at": current_class.get('created_at'),
-        "updated_at": datetime.utcnow().isoformat(),
-        "statistics": db.calculate_class_statistics(class_data.dict(), class_id)
-    }
-    
-    # Write to file
-    db.write_json(class_file, updated_class_data)
-    print(f"\n[UPDATE_CLASS] ✅ Saved to file with {len(final_students)} students")
-    
-    # Verify what was written
-    verification = db.read_json(class_file)
-    print(f"[UPDATE_CLASS] 🔍 Verification: File now has {len(verification.get('students', []))} students")
-    
-    # Update teacher overview
-    db.update_user_overview(user_id)
-    
-    print(f"{'='*60}\n")
-    
-    # Return only active students to frontend
-    response_data = updated_class_data.copy()
-    response_data['students'] = class_data.students
-    
-    return {"success": True, "class": response_data}
-
 
 @app.delete("/classes/{class_id}")
 async def delete_class(class_id: str, email: str = Depends(verify_token)):
@@ -1425,72 +1296,122 @@ async def delete_class(class_id: str, email: str = Depends(verify_token)):
     user = db.get_user_by_email(email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    success = db.delete_class(user["id"], class_id)
+
+    success = db.delete_class(class_id)
     if not success:
         raise HTTPException(status_code=404, detail="Class not found")
-    
+
     return {"success": True, "message": "Class deleted successfully"}
 
 
 # ==================== CONTACT ENDPOINT ====================
 
 @app.post("/contact")
-async def submit_contact(request: ContactRequest):
-    """Submit contact form"""
+async def submit_contact(
+    data: ContactRequest,
+    email: str = Depends(verify_token),
+):
+    """Submit a contact/support message (authenticated users only)"""
     try:
-        message_data = {
-            "name": request.name,
-            "subject": request.subject,
-            "message": request.message
-        }
+        # Verify user exists (teacher or student)
+        user = db.get_user_by_email(email)
+        if not user:
+            student = db.get_student_by_email(email)
+            if not student:
+                raise HTTPException(status_code=404, detail="User not found")
         
-        success = db.save_contact_message(request.email, message_data)
-        
-        if success:
-            return {"success": True, "message": "Message received successfully"}
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to save message"
-            )
-    except Exception as e:
-        print(f"Contact form error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process contact form"
+        # Save message to Supabase (assumes db.save_contact_message exists)
+        success = db.save_contact_message(
+            name=data.name or user.get("name", "Unknown"),
+            email=data.email,
+            message=f"{data.subject}\n\n{data.message}"
         )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save message")
+            
+        return {"success": True, "message": "Contact message sent successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Contact submission error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send message")
     
 # ==================== QR CODE ATTENDANCE ENDPOINTS ====================
 
 @app.post("/qr/start")
-async def start_qr_session(qr_data: QRStart, user: dict = Depends(get_current_user)):
-    session = db.create_qr_session(qr_data.class_id, user["id"], qr_data.attendance_date)
-    return {"success": True, "session": session}
-
-@app.post("/qr/start-session")
-async def start_qr_session(request: dict, email: str = Depends(verify_token)):
-    class_id = request.get("class_id")
-    rotation_interval = request.get("rotation_interval", 5)
-    
-    print(f"[API] QR start request: class_id={class_id}")
-    
+async def start_qr_session(
+    qr_data: QRStart, 
+    email: str = Depends(verify_token)
+):
+    """Teacher starts QR session"""
     user = db.get_user_by_email(email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    session = db.start_qr_session(class_id, user["id"], rotation_interval)
+    session = db.create_qr_session(
+        class_id=qr_data.class_id, 
+        teacher_id=user["id"], 
+        attendance_date=qr_data.attendance_date
+    )
     return {"success": True, "session": session}
+
 
 @app.get("/qr/{class_id}")
 async def get_qr_code(class_id: str):
+    """Get current QR code for active session (public for students)"""
     session = db.get_qr_session(class_id)
     if not session:
         raise HTTPException(status_code=404, detail="No active QR session")
     return {"qr_code": session["current_code"]}
 
+
+@app.post("/qr/scan")
+async def scan_qr_endpoint(
+    scan_data: QRScan, 
+    email: str = Depends(verify_token)
+):
+    """Student scans QR code to mark attendance"""
+    try:
+        student = db.get_student_by_email(email)
+        if not student:
+            raise HTTPException(status_code=404, detail="Student not found")
+        
+        result = db.scan_qr_code(
+            student_id=student["id"],
+            class_id=scan_data.class_id, 
+            qr_code=scan_data.qr_code
+        )
+        return result
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"QR scan error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to scan QR code")
+
+
+@app.post("/qr/stop/{class_id}")
+async def stop_qr_session_endpoint(
+    class_id: str, 
+    email: str = Depends(verify_token)
+):
+    """Teacher stops QR session and marks absents"""
+    user = db.get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    result = db.stop_qr_session(class_id, user["id"])
+    return result
+
+
 @app.get("/qr/session/{class_id}")
-async def get_qr_session(class_id: str, email: str = Depends(verify_token)):
+async def get_qr_session_status(
+    class_id: str, 
+    email: str = Depends(verify_token)
+):
+    """Check if teacher has active QR session for class"""
     user = db.get_user_by_email(email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -1500,70 +1421,6 @@ async def get_qr_session(class_id: str, email: str = Depends(verify_token)):
         return {"active": False}
     
     return {"active": True, "session": session}
-
-@app.post("/qr/scan")
-async def scan_qr_code(
-    class_id: str,
-    qr_code: str,
-    email: str = Depends(verify_token)
-):
-    """Student scans QR code to mark attendance"""
-    try:
-        student = db.get_student_by_email(email)
-        if not student:
-            raise HTTPException(status_code=404, detail="Student not found")
-        
-        student_id = student["id"]
-        
-        result = db.scan_qr_code(student_id, class_id, qr_code)
-        
-        return result
-    
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        print(f"QR scan error: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to scan QR code"
-        )
-
-@app.post("/qr/scan")
-async def scan_qr_endpoint(scan_data: QRScan, user: dict = Depends(get_current_student)):
-    result = db.scan_qr_code(user["id"], scan_data.class_id, scan_data.qr_code)
-    return result
-
-@app.post("/qr/stop-session")
-async def stop_qr_session(request: dict, email: str = Depends(verify_token)):
-    """Stop QR session and mark absent students"""
-    try:
-        class_id = request.get("class_id")
-        
-        user = db.get_user_by_email(email)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        result = db.stop_qr_session(class_id, user["id"])
-        
-        return result
-    
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        print(f"Stop QR session error: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to stop QR session"
-        )
-
-@app.post("/qr/stop/{class_id}")
-async def stop_qr_session_endpoint(class_id: str, user: dict = Depends(get_current_user)):
-    result = db.stop_qr_session(class_id, user["id"])
-    return result
 
 # ==================== HEALTH CHECK ====================
 
