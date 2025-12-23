@@ -15,19 +15,11 @@ import random
 import string
 from dotenv import load_dotenv
 import ssl
-from db_manager import DatabaseManager, init_db
+from db_manager import DatabaseManager
 
 load_dotenv()
 
 app = FastAPI(title="Lernova Attendsheets API")
-
-# Initialize database tables in Supabase
-@app.on_event("startup")
-async def on_startup():
-    try:
-        init_db()
-    except Exception as e:
-        print("DB init failed (will retry on first request):", e)
 
 # CORS - permissive for development
 app.add_middleware(
