@@ -85,24 +85,18 @@ class ClassService {
 
   async createClass(classData: Class): Promise<Class> {
     try {
-      // Transform frontend Class to backend ClassCreate format
       const backendPayload = {
-        class_id: String(classData.id), // backend expects string
-        name: classData.name,
-        thresholds: classData.thresholds || {
-          excellent: 90,
-          good: 75,
-          moderate: 60,
-          atRisk: 50
-        },
-        custom_columns: classData.customColumns || [] // snake_case
+        class_id: String(classData.id),          // required
+        name: classData.name,                    // required
+        thresholds: classData.thresholds || {},  // object, not null
+        custom_columns: classData.customColumns || [], // snake_case
       };
-      
+  
       const result = await this.apiCall<{ success: boolean; class: Class }>('/classes', {
         method: 'POST',
         body: JSON.stringify(backendPayload),
       });
-      
+  
       return result.class;
     } catch (error) {
       console.error('Error creating class:', error);
@@ -110,28 +104,26 @@ class ClassService {
     }
   }
 
-
   async updateClass(classId: string, classData: Class): Promise<Class> {
     try {
       const backendPayload = {
         class_id: classId,
         name: classData.name,
         thresholds: classData.thresholds || {},
-        custom_columns: classData.customColumns || []
+        custom_columns: classData.customColumns || [],
       };
-      
+  
       const result = await this.apiCall<{ success: boolean; class: Class }>(`/classes/${classId}`, {
         method: 'PUT',
         body: JSON.stringify(backendPayload),
       });
-      
+  
       return result.class;
     } catch (error) {
       console.error('Error updating class:', error);
       throw error;
     }
   }
-
 
   async deleteClass(classId: string): Promise<boolean> {
     try {
