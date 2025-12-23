@@ -15,11 +15,14 @@ import random
 import string
 from dotenv import load_dotenv
 import ssl
-from db_manager import DatabaseManager
+from db_manager import DatabaseManager, init_db
 
 load_dotenv()
 
 app = FastAPI(title="Lernova Attendsheets API")
+
+# Initialize database tables in Supabase
+init_db()
 
 # CORS - permissive for development
 app.add_middleware(
@@ -415,7 +418,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired",
         )
-    except jwt.PyJWTError:  # ✅ FIXED - Use PyJWTError instead of JWTError
+    except jwt.PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -430,7 +433,7 @@ def read_root():
         "message": "Lernova Attendsheets API",
         "version": "1.0.0",
         "status": "online",
-        "database": "file-based"
+        "database": "supabase-postgres"
     }
 
 
@@ -1022,12 +1025,7 @@ async def delete_student_account(email: str = Depends(verify_token)):
 
 @app.post("/student/enroll")
 async def enroll_in_class(request: StudentEnrollmentRequest, email: str = Depends(verify_token)):
-    """
-    Enroll student in a class.
-    - If student was previously enrolled and unenrolled, restore their data
-    - If new enrollment, create new record
-    - Email must match logged-in user (security)
-    """
+    """Enroll student in a class"""
     try:
         # Get student data
         student = db.get_student_by_email(email)
@@ -1225,79 +1223,6 @@ async def verify_class_exists(class_id: str):
         )
 
 
-# 5. UPDATE your existing verify-email endpoint to handle both roles
-# REPLACE your existing @app.post("/auth/verify-email") with this:
-
-@app.post("/auth/verify-email", response_model=TokenResponse)
-async def verify_email(request: VerifyEmailRequest):
-    """Verify email with code - handles both teacher and student"""
-    try:
-        if request.email not in verification_codes:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No verification code found"
-            )
-        
-        stored_data = verification_codes[request.email]
-        expires_at = datetime.fromisoformat(stored_data["expires_at"])
-        
-        if datetime.utcnow() > expires_at:
-            del verification_codes[request.email]
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Verification code expired"
-            )
-        
-        if stored_data["code"] != request.code:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid verification code"
-            )
-        
-        # Get role from stored data (default to teacher for backward compatibility)
-        role = stored_data.get("role", "teacher")
-        
-        # Create user based on role
-        if role == "student":
-            user_id = f"student_{int(datetime.utcnow().timestamp())}"
-            user_data = db.create_student(
-                student_id=user_id,
-                email=request.email,
-                name=stored_data["name"],
-                password_hash=stored_data["password"]
-            )
-        else:
-            user_id = f"user_{int(datetime.utcnow().timestamp())}"
-            user_data = db.create_user(
-                user_id=user_id,
-                email=request.email,
-                name=stored_data["name"],
-                password_hash=stored_data["password"]
-            )
-        
-        # Clean up verification code
-        del verification_codes[request.email]
-        
-        # Create access token with role
-        access_token = create_access_token(
-            data={"sub": request.email, "role": role},
-            expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        )
-        
-        return TokenResponse(
-            access_token=access_token,
-            user=UserResponse(id=user_id, email=request.email, name=stored_data["name"])
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Verification error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Verification failed: {str(e)}"
-        )
-
-
 # ==================== CLASS ENDPOINTS ====================
 
 @app.get("/classes")
@@ -1338,9 +1263,7 @@ async def get_class(class_id: str, email: str = Depends(verify_token)):
 
 @app.put("/classes/{class_id}")
 async def update_class(class_id: str, class_data: ClassRequest, email: str = Depends(verify_token)):
-    """
-    Update a class - handles student deletions AND preserves inactive student data
-    """
+    """Update a class - handles student deletions AND preserves inactive student data"""
     print(f"\n{'='*60}")
     print(f"[UPDATE_CLASS] Starting update for class {class_id}")
     print(f"{'='*60}")
@@ -1508,7 +1431,7 @@ async def submit_contact(request: ContactRequest):
             detail="Failed to process contact form"
         )
     
-    # ==================== QR CODE ATTENDANCE ENDPOINTS ====================
+# ==================== QR CODE ATTENDANCE ENDPOINTS ====================
 
 @app.post("/qr/start-session")
 async def start_qr_session(request: dict, email: str = Depends(verify_token)):
@@ -1542,9 +1465,7 @@ async def scan_qr_code(
     qr_code: str,
     email: str = Depends(verify_token)
 ):
-    """
-    Student scans QR code to mark attendance
-    """
+    """Student scans QR code to mark attendance"""
     try:
         student = db.get_student_by_email(email)
         if not student:
@@ -1567,22 +1488,43 @@ async def scan_qr_code(
             detail="Failed to scan QR code"
         )
 
+
 @app.post("/qr/stop-session")
-async def stop_qr_session(payload: dict, email: str = Depends(verify_token)):
-    class_id = payload.get("class_id")
-    if not class_id:
-        raise HTTPException(status_code=400, detail="class_id required")
-
-    user = db.get_user_by_email(email)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
+async def stop_qr_session(request: dict, email: str = Depends(verify_token)):
+    """Stop QR session and mark absent students"""
     try:
+        class_id = request.get("class_id")
+        
+        user = db.get_user_by_email(email)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
         result = db.stop_qr_session(class_id, user["id"])
+        
         return result
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        print(f"[QR_STOP] Error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to stop QR session")
+        print(f"Stop QR session error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to stop QR session"
+        )
+
+
+# ==================== HEALTH CHECK ====================
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "database": "supabase-postgres"
+    }
 
 
 if __name__ == "__main__":
