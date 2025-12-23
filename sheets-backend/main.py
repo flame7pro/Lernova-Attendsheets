@@ -61,6 +61,13 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+class StudentCreate(BaseModel):
+    student_id: str
+    email: EmailStr
+    name: str
+    password_hash: str
+    roll_no: str = ""
+
 class StudentEnrollmentRequest(BaseModel):
     class_id: str
     name: str
