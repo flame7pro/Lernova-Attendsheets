@@ -122,7 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Add role to user object if not present
       const userData = { ...response.user, role: response.user.role || role };
 
-      localStorage.setItem('accesstoken', response.access_token);
+      localStorage.setItem('accesstoken', response.accesstoken);
       localStorage.setItem('user', JSON.stringify(userData));
       localStorage.setItem('userrole', userData.role);
 
@@ -131,7 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.removeItem('pendingsignuprole');
       }
 
-      setToken(response.access_token);
+      setToken(response.accesstoken);
       setUser(userData);
 
       return { success: true, message: 'Email verified successfully' };
@@ -171,11 +171,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Add role to user object
       const userData = { ...response.user, role };
 
-      localStorage.setItem('accesstoken', response.access_token);
+      localStorage.setItem('accesstoken', response.accesstoken);
       localStorage.setItem('user', JSON.stringify(userData));
       localStorage.setItem('userrole', role);
 
-      setToken(response.access_token);
+      setToken(response.accesstoken);
       setUser(userData);
 
       return { success: true, message: 'Login successful', role: role, user: userData };
