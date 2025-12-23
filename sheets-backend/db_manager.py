@@ -237,7 +237,6 @@ class DatabaseManager:
     # ==================== CLASS OPERATIONS ====================
     
     def create_class(self, class_id: str, teacher_id: str, name: str, thresholds: Dict[str, int] = None, custom_columns: List[Dict] = None) -> Dict[str, Any]:
-        """Create a new class"""
         try:
             if thresholds is None:
                 thresholds = {"low": 75, "mid": 85}
@@ -272,7 +271,6 @@ class DatabaseManager:
             return None
     
     def get_classes_by_teacher(self, teacher_id: str) -> List[Dict[str, Any]]:
-        """Get all classes for a teacher"""
         try:
             result = self.supabase.table("classes").select("*").eq("teacher_id", teacher_id).execute()
             return result.data or []
@@ -299,9 +297,8 @@ class DatabaseManager:
             return False
     
     def get_all_classes(self, teacher_id: str) -> List[Dict[str, Any]]:
-        """Get all classes for a teacher - FIXED SIGNATURE"""
         try:
-            result = self.supabase.table("classes").eq("teacher_id", teacher_id).execute()
+            result = self.supabase.table("classes").select("*").eq("teacher_id", teacher_id).execute()
             return result.data or []
         except Exception as e:
             print(f"Error getting classes by teacher: {e}")
