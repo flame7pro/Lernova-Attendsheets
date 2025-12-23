@@ -44,10 +44,10 @@ class DatabaseManager:
     def __init__(self):
         self.supabase = supabase
     
-    # ==================== USER OPERATIONS ====================
+    # ==================== USER OPERATIONS ==================== #
     
     def create_user(self, user_id: str, email: str, name: str, password_hash: str, role: str = "teacher") -> Dict[str, Any]:
-        """Create a new user (teacher) in Supabase"""
+        """Create a new user/teacher in Supabase"""
         try:
             data = {
                 "id": user_id,
@@ -55,6 +55,12 @@ class DatabaseManager:
                 "name": name,
                 "password_hash": password_hash,
                 "role": role,
+                "verified": True,
+                "overview": {
+                    "total_classes": 0,
+                    "total_students": 0,
+                    "last_updated": datetime.utcnow().isoformat()
+                },
                 "created_at": datetime.utcnow().isoformat()
             }
             result = self.supabase.table("users").insert(data).execute()
@@ -64,12 +70,14 @@ class DatabaseManager:
                 "email": row["email"],
                 "name": row["name"],
                 "password": row["password_hash"],
-                "role": row.get("role", role),
+                "role": row.get("role", "teacher"),
+                "verified": row.get("verified", True),
+                "overview": row.get("overview", {})
             }
         except Exception as e:
             print(f"Error creating user: {e}")
             raise
-    
+
     def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Get user data by ID"""
         try:
@@ -83,11 +91,13 @@ class DatabaseManager:
                 "name": row["name"],
                 "password": row["password_hash"],
                 "role": row.get("role", "teacher"),
+                "verified": row.get("verified", True),
+                "overview": row.get("overview", {})
             }
         except Exception as e:
             print(f"Error getting user: {e}")
             return None
-    
+
     def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         """Get user data by email"""
         try:
@@ -101,43 +111,39 @@ class DatabaseManager:
                 "name": row["name"],
                 "password": row["password_hash"],
                 "role": row.get("role", "teacher"),
+                "verified": row.get("verified", True),
+                "overview": row.get("overview", {})
             }
         except Exception as e:
             print(f"Error getting user by email: {e}")
             return None
-    
+
     def update_user(self, user_id: str, **updates) -> Dict[str, Any]:
-        """Update user data"""
-        user_data = self.get_user(user_id)
-        if not user_data:
-            raise ValueError(f"User {user_id} not found")
-        user_data.update(updates)
-        user_data["updated_at"] = datetime.utcnow().isoformat()
-        self.write_json(self.get_user_file(user_id), user_data)
-        return user_data
-    
+        """Update user data - FIXED FOR SUPABASE"""
+        try:
+            updates["updated_at"] = datetime.utcnow().isoformat()
+            self.supabase.table("users").update(updates).eq("id", user_id).execute()
+            return self.get_user(user_id)
+        except Exception as e:
+            print(f"Error updating user: {e}")
+            raise
+
     def delete_user(self, user_id: str) -> bool:
         """Delete user and cascade delete related data"""
         try:
-            # Cascade will automatically delete classes and enrollments
+            # Delete classes first
+            self.supabase.table("classes").delete().eq("teacher_id", user_id).execute()
+            # Delete user
             self.supabase.table("users").delete().eq("id", user_id).execute()
+            print(f"[DELETE_USER] Deleted user {user_id} + all classes")
             return True
         except Exception as e:
             print(f"Error deleting user: {e}")
             return False
-    
-    def get_all_users(self) -> List[Dict[str, Any]]:
-        """Get all users"""
-        try:
-            result = self.supabase.table("users").select("*").execute()
-            return result.data or []
-        except Exception as e:
-            print(f"Error getting all users: {e}")
-            return []
-    
+
     # ==================== STUDENT OPERATIONS ====================
     
-    def create_student(self, student_id: str, email: str, name: str, password_hash: str, roll_no: str = None) -> Dict[str, Any]:
+    def create_student(self, student_id: str, email: str, name: str, password_hash: str) -> Dict[str, Any]:
         """Create a new student in Supabase"""
         try:
             data = {
@@ -145,8 +151,9 @@ class DatabaseManager:
                 "email": email,
                 "name": name,
                 "password_hash": password_hash,
-                "roll_no": roll_no,
-                "extra": {},
+                "role": "student",
+                "verified": True,
+                "enrolled_classes": [],
                 "created_at": datetime.utcnow().isoformat()
             }
             result = self.supabase.table("students").insert(data).execute()
@@ -156,7 +163,6 @@ class DatabaseManager:
                 "email": row["email"],
                 "name": row["name"],
                 "password": row["password_hash"],
-                "roll_no": row.get("roll_no"),
                 "role": "student",
                 "verified": True,
                 "enrolled_classes": []
@@ -164,108 +170,69 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error creating student: {e}")
             raise
-    
+
     def get_student(self, student_id: str) -> Optional[Dict[str, Any]]:
-        """Get student data by ID with enrolled classes"""
+        """Get student data by ID"""
         try:
             result = self.supabase.table("students").select("*").eq("id", student_id).execute()
             if not result.data:
                 return None
             row = result.data[0]
-            
-            # Get enrolled classes
-            enrolled_classes = self.get_student_enrollments(student_id)
-            
             return {
                 "id": row["id"],
                 "email": row["email"],
                 "name": row["name"],
                 "password": row["password_hash"],
-                "roll_no": row.get("roll_no"),
                 "role": "student",
-                "verified": True,
-                "enrolled_classes": enrolled_classes
+                "verified": row.get("verified", True),
+                "enrolled_classes": row.get("enrolled_classes", [])
             }
         except Exception as e:
             print(f"Error getting student: {e}")
             return None
-    
+
     def get_student_by_email(self, email: str) -> Optional[Dict[str, Any]]:
-        """Get student by email with enrolled classes"""
+        """Get student by email"""
         try:
             result = self.supabase.table("students").select("*").eq("email", email).execute()
             if not result.data:
                 return None
             row = result.data[0]
-            
-            # Get enrolled classes
-            enrolled_classes = self.get_student_enrollments(row["id"])
-            
             return {
                 "id": row["id"],
                 "email": row["email"],
                 "name": row["name"],
                 "password": row["password_hash"],
-                "roll_no": row.get("roll_no"),
                 "role": "student",
-                "verified": True,
-                "enrolled_classes": enrolled_classes
+                "verified": row.get("verified", True),
+                "enrolled_classes": row.get("enrolled_classes", [])
             }
         except Exception as e:
             print(f"Error getting student by email: {e}")
             return None
-    
+
     def update_student(self, student_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
-        """Update student data"""
-        student_data = self.get_student(student_id)
-        if not student_data:
-            raise ValueError(f"Student {student_id} not found")
-        student_data.update(updates)
-        student_data["updated_at"] = datetime.utcnow().isoformat()
-        self.write_json(self.get_student_file(student_id), student_data)
-        return student_data
-    
+        """Update student data - FIXED FOR SUPABASE"""
+        try:
+            updates["updated_at"] = datetime.utcnow().isoformat()
+            self.supabase.table("students").update(updates).eq("id", student_id).execute()
+            return self.get_student(student_id)
+        except Exception as e:
+            print(f"Error updating student: {e}")
+            raise
+
     def delete_student(self, student_id: str) -> bool:
         """Delete student and clean up enrollments"""
         try:
-            # Get enrollments before deletion to update teacher overviews
-            enrollments = self.supabase.table("enrollments").select("*").eq("student_id", student_id).execute()
-            enrolled_classes = enrollments.data or []
-            
-            # Update teacher overviews for affected classes
-            for enrollment in enrolled_classes:
-                class_id = enrollment.get("class_id")
-                class_data = self.get_class_by_id(class_id)
-                if class_data:
-                    teacher_id = class_data.get("teacher_id")
-                    if teacher_id:
-                        self.update_user_overview(teacher_id)
-            
-            # Delete student (cascade will handle enrollments)
+            # Delete enrollments first
+            self.supabase.table("enrollments").delete().eq("student_id", student_id).execute()
+            # Delete student
             self.supabase.table("students").delete().eq("id", student_id).execute()
+            print(f"[DELETE_STUDENT] Deleted student {student_id}")
             return True
         except Exception as e:
             print(f"Error deleting student: {e}")
             return False
-    
-    def get_all_students(self) -> List[Dict[str, Any]]:
-        """Get all students"""
-        try:
-            result = self.supabase.table("students").select("*").execute()
-            students = []
-            for row in result.data or []:
-                students.append({
-                    "id": row["id"],
-                    "email": row["email"],
-                    "name": row["name"],
-                    "roll_no": row.get("roll_no"),
-                    "role": "student",
-                    "created_at": row.get("created_at")
-                })
-            return students
-        except Exception as e:
-            print(f"Error getting all students: {e}")
-            return []
     
     # ==================== CLASS OPERATIONS ====================
     
@@ -331,13 +298,13 @@ class DatabaseManager:
             print(f"Error deleting class: {e}")
             return False
     
-    def get_all_classes(self) -> List[Dict[str, Any]]:
-        """Get all classes"""
+    def get_all_classes(self, teacher_id: str) -> List[Dict[str, Any]]:
+        """Get all classes for a teacher - FIXED SIGNATURE"""
         try:
-            result = self.supabase.table("classes").select("*").execute()
+            result = self.supabase.table("classes").eq("teacher_id", teacher_id).execute()
             return result.data or []
         except Exception as e:
-            print(f"Error getting all classes: {e}")
+            print(f"Error getting classes by teacher: {e}")
             return []
     
     # ==================== ENROLLMENT OPERATIONS ====================
