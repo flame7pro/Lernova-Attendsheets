@@ -22,7 +22,12 @@ load_dotenv()
 app = FastAPI(title="Lernova Attendsheets API")
 
 # Initialize database tables in Supabase
-init_db()
+@app.on_event("startup")
+async def on_startup():
+    try:
+        init_db()
+    except Exception as e:
+        print("DB init failed (will retry on first request):", e)
 
 # CORS - permissive for development
 app.add_middleware(
