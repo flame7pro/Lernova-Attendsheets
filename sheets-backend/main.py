@@ -1321,22 +1321,32 @@ async def delete_class(class_id: str, email: str = Depends(verify_token)):
 
     return {"success": True, "message": "Class deleted successfully"}
 
+from fastapi import Body
+
 @app.put("/classes/{class_id}")
 async def update_class_endpoint(
     class_id: str,
-    data: ClassCreate,
+    class_data: dict = Body(...),
     email: str = Depends(verify_token),
 ):
     user = db.get_user_by_email(email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Normalise keys from frontend/backend
+    custom_columns = (
+        class_data.get("customColumns")
+        or class_data.get("custom_columns")
+        or []
+    )
+    thresholds = class_data.get("thresholds")  # keep whatever frontend sends
+
     updated = db.update_class(
         class_id=class_id,
         teacher_id=user["id"],
-        name=data.name,
-        thresholds=data.thresholds,
-        custom_columns=data.custom_columns,
+        name=class_data["name"],
+        thresholds=thresholds,
+        custom_columns=custom_columns,
     )
 
     if not updated:
