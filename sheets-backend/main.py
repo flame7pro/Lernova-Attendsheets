@@ -1278,21 +1278,34 @@ async def get_class(class_id: str, email: str = Depends(verify_token)):
 
 @app.post("/classes")
 async def create_class_endpoint(
-    class_data: ClassCreate,
+    class_data: dict = Body(...),
     email: str = Depends(verify_token),
 ):
-    """Create a new class"""
     user = db.get_user_by_email(email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Ensure required keys
+    for key in ["id", "name", "students", "customColumns"]:
+        if key not in class_data:
+            raise HTTPException(status_code=422, detail=f"Missing field: {key}")
+
+    # Handle thresholds: use provided or defaults
+    thresholds = class_data.get("thresholds") or {
+        "excellent": 90,
+        "good": 75,
+        "moderate": 60,
+        "atRisk": 50,
+    }
+
     created_class = db.create_class(
-        class_id=class_data.class_id,
+        class_id=class_data["id"],
         teacher_id=user["id"],
-        name=class_data.name,
-        thresholds=class_data.thresholds,
-        custom_columns=class_data.custom_columns,
+        name=class_data["name"],
+        thresholds=thresholds,
+        custom_columns=class_data.get("customColumns", []),
     )
+
     return {"success": True, "class": created_class}
 
 @app.delete("/classes/{class_id}")
