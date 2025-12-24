@@ -39,7 +39,7 @@ export interface Class {
 
 class ClassService {
   private getAuthHeaders(): Record<string, string> {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accesstoken') : null;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null; // ✅ Fixed: 'token' not 'accesstoken'
     return {
       'Content-Type': 'application/json',
       ...(token && { 'Authorization': `Bearer ${token}` }),
@@ -63,13 +63,13 @@ class ClassService {
     return response.json();
   }
 
-  // ✅ NEW: Transform backend response to frontend format
+  // ✅ Transform backend response to frontend format
   private transformClassFromBackend(backendClass: any): Class {
     return {
       id: Number(backendClass.class_id || backendClass.id),
       name: backendClass.name,
       students: backendClass.students || [],
-      customColumns: backendClass.custom_columns || [],
+      customColumns: backendClass.custom_columns || backendClass.customColumns || [], // ✅ Handle both formats
       thresholds: backendClass.thresholds || {
         excellent: 90,
         good: 75,
