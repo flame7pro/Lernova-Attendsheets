@@ -258,14 +258,22 @@ class DatabaseManager:
             print(f"Error getting classes by teacher: {e}")
             return []
     
-    def update_class(self, class_id: str, updates: Dict[str, Any]) -> bool:
-        """Update class data"""
-        try:
-            self.supabase.table("classes").update(updates).eq("id", class_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error updating class: {e}")
-            return False
+    def update_class(self, class_id: str, teacher_id: str, name: str,
+                     thresholds: dict, custom_columns: list) -> dict:
+        resp = (
+            self.supabase
+            .table("classes")
+            .update({
+                "name": name,
+                "thresholds": thresholds,
+                "custom_columns": custom_columns,
+            })
+            .eq("id", class_id)
+            .eq("teacher_id", teacher_id)
+            .execute()
+        )
+        return resp.data[0] if resp.data else None
+
     
     def delete_class(self, class_id: str) -> bool:
         """Delete class and cascade delete enrollments"""
