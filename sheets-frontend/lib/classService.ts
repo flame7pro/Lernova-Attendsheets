@@ -99,30 +99,24 @@ class ClassService {
     }
   }
 
-  async createClass(classData: Class): Promise<Class> {
-    try {
-      const backendPayload = {
-        class_id: String(classData.id),
-        name: classData.name,
-        thresholds: classData.thresholds || {
-          excellent: 90,
-          good: 75,
-          moderate: 60,
-          atRisk: 50
-        },
-        custom_columns: classData.customColumns || [],
-      };
-
-      const result = await this.apiCall<{ success: boolean; class: any }>('/classes', {
+ async createClass(classData: Class): Promise<Class> {
+    const payload = {
+      id: classData.id,                          // required int
+      name: classData.name,                      // required string
+      students: classData.students ?? [],        // required list
+      customColumns: classData.customColumns ?? [], // required list
+      thresholds: classData.thresholds ?? null,  // optional
+    };
+  
+    const result = await this.apiCall<{ success: boolean; class: Class }>(
+      '/classes',
+      {
         method: 'POST',
-        body: JSON.stringify(backendPayload),
-      });
-
-      return this.transformClassFromBackend(result.class);
-    } catch (error) {
-      console.error('Error creating class:', error);
-      throw error;
-    }
+        body: JSON.stringify(payload),
+      }
+    );
+  
+    return result.class;
   }
 
   async updateClass(classId: string, classData: Class): Promise<Class> {
