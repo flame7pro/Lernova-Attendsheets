@@ -63,10 +63,26 @@ class ClassService {
     return response.json();
   }
 
+  // ✅ NEW: Transform backend response to frontend format
+  private transformClassFromBackend(backendClass: any): Class {
+    return {
+      id: Number(backendClass.class_id || backendClass.id),
+      name: backendClass.name,
+      students: backendClass.students || [],
+      customColumns: backendClass.custom_columns || [],
+      thresholds: backendClass.thresholds || {
+        excellent: 90,
+        good: 75,
+        moderate: 60,
+        atRisk: 50
+      }
+    };
+  }
+
   async getAllClasses(): Promise<Class[]> {
     try {
-      const result = await this.apiCall<{ classes: Class[] }>('/classes');
-      return result.classes;
+      const result = await this.apiCall<{ classes: any[] }>('/classes');
+      return result.classes.map(c => this.transformClassFromBackend(c));
     } catch (error) {
       console.error('Error fetching classes:', error);
       throw error;
@@ -75,8 +91,8 @@ class ClassService {
 
   async getClass(classId: string): Promise<Class> {
     try {
-      const result = await this.apiCall<{ class: Class }>(`/classes/${classId}`);
-      return result.class;
+      const result = await this.apiCall<{ class: any }>(`/classes/${classId}`);
+      return this.transformClassFromBackend(result.class);
     } catch (error) {
       console.error('Error fetching class:', error);
       throw error;
@@ -86,18 +102,23 @@ class ClassService {
   async createClass(classData: Class): Promise<Class> {
     try {
       const backendPayload = {
-        class_id: String(classData.id),          // required
-        name: classData.name,                    // required
-        thresholds: classData.thresholds || {},  // object, not null
-        custom_columns: classData.customColumns || [], // snake_case
+        class_id: String(classData.id),
+        name: classData.name,
+        thresholds: classData.thresholds || {
+          excellent: 90,
+          good: 75,
+          moderate: 60,
+          atRisk: 50
+        },
+        custom_columns: classData.customColumns || [],
       };
-  
-      const result = await this.apiCall<{ success: boolean; class: Class }>('/classes', {
+
+      const result = await this.apiCall<{ success: boolean; class: any }>('/classes', {
         method: 'POST',
         body: JSON.stringify(backendPayload),
       });
-  
-      return result.class;
+
+      return this.transformClassFromBackend(result.class);
     } catch (error) {
       console.error('Error creating class:', error);
       throw error;
@@ -109,16 +130,21 @@ class ClassService {
       const backendPayload = {
         class_id: classId,
         name: classData.name,
-        thresholds: classData.thresholds || {},
+        thresholds: classData.thresholds || {
+          excellent: 90,
+          good: 75,
+          moderate: 60,
+          atRisk: 50
+        },
         custom_columns: classData.customColumns || [],
       };
-  
-      const result = await this.apiCall<{ success: boolean; class: Class }>(`/classes/${classId}`, {
+
+      const result = await this.apiCall<{ success: boolean; class: any }>(`/classes/${classId}`, {
         method: 'PUT',
-        body: JSON.stringify(backendPayload),  // ✅ matches backend ClassCreate
+        body: JSON.stringify(backendPayload),
       });
-  
-      return result.class;
+
+      return this.transformClassFromBackend(result.class);
     } catch (error) {
       console.error('Error updating class:', error);
       throw error;
@@ -140,13 +166,15 @@ class ClassService {
   async syncClasses(localClasses: Class[]): Promise<Class[]> {
     try {
       const backendClasses = await this.getAllClasses();
-      const backendClassIds = new Set(backendClasses.map(c => c.id));
+      const backendClassIds = new Set(backendClasses.map(c => String(c.id)));
 
       for (const localClass of localClasses) {
-        if (!backendClassIds.has(localClass.id)) {
+        const classIdStr = String(localClass.id);
+        
+        if (!backendClassIds.has(classIdStr)) {
           await this.createClass(localClass);
         } else {
-          await this.updateClass(String(localClass.id), localClass);
+          await this.updateClass(classIdStr, localClass);
         }
       }
 
