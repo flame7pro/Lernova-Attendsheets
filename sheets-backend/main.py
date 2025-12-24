@@ -1335,26 +1335,29 @@ async def update_class_endpoint(
 
 @app.post("/contact")
 async def submit_contact(request: ContactRequest):
-    "Submit contact form"
+    """Submit contact form"""
     try:
         messagedata = {
             "name": request.name,
             "subject": request.subject,
             "message": request.message,
         }
+
+        # ✅ Pass both email and message dict
         success = db.save_contact_message(request.email, messagedata)
+
         if success:
             return {"success": True, "message": "Message received successfully"}
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to save message"
+                detail="Failed to save message",
             )
     except Exception as e:
         print("Contact form error:", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process contact form"
+            detail="Failed to process contact form",
         )
     
 # ==================== QR CODE ATTENDANCE ENDPOINTS ====================
