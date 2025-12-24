@@ -1337,14 +1337,12 @@ async def update_class_endpoint(
 async def submit_contact(request: ContactRequest):
     """Submit contact form"""
     try:
-        messagedata = {
-            "name": request.name,
-            "subject": request.subject,
-            "message": request.message,
-        }
-
-        # ✅ Pass both email and message dict
-        success = db.save_contact_message(request.email, messagedata)
+        # ✅ Call with 3 positional args: name, email, message
+        success = db.save_contact_message(
+            request.name,
+            request.email,
+            request.message,
+        )
 
         if success:
             return {"success": True, "message": "Message received successfully"}
