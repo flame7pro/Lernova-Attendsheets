@@ -1333,37 +1333,18 @@ async def update_class_endpoint(
 
 # ==================== CONTACT ENDPOINT ====================
 
-@app.post("/contact")
-async def submit_contact(
-    data: ContactRequest,
-    email: str = Depends(verify_token),
-):
-    """Submit a contact/support message (authenticated users only)"""
+@app.post("/contact")  # ✅ No Depends(verify_token) here
+async def submit_contact(data: ContactRequest):
     try:
-        # Verify user exists (teacher or student)
-        user = db.get_user_by_email(email)
-        if not user:
-            student = db.get_student_by_email(email)
-            if not student:
-                raise HTTPException(status_code=404, detail="User not found")
-        
-        # Save message to Supabase (assumes db.save_contact_message exists)
-        success = db.save_contact_message(
-            name=data.name or user.get("name", "Unknown"),
-            email=data.email,
-            message=f"{data.subject}\n\n{data.message}"
-        )
-        
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to save message")
-            
-        return {"success": True, "message": "Contact message sent successfully"}
-        
-    except HTTPException:
-        raise
+        result = db.create_contact_message({
+            "name": data.name,
+            "email": data.email,
+            "subject": data.subject,
+            "message": data.message,
+        })
+        return {"success": True, "message": "Message sent successfully"}
     except Exception as e:
-        print(f"Contact submission error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send message")
+        raise HTTPException(status_code=500, detail=str(e))
     
 # ==================== QR CODE ATTENDANCE ENDPOINTS ====================
 
