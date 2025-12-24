@@ -1335,7 +1335,7 @@ async def update_class_endpoint(
 
 @app.post("/contact")
 async def submit_contact(request: ContactRequest):
-    Submit contact form
+    "Submit contact form"
     try:
         messagedata = {
             "name": request.name,
