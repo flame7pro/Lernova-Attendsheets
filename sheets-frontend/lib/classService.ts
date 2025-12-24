@@ -115,7 +115,7 @@ class ClassService {
   
       const result = await this.apiCall<{ success: boolean; class: Class }>(`/classes/${classId}`, {
         method: 'PUT',
-        body: JSON.stringify(backendPayload),
+        body: JSON.stringify(backendPayload),  // ✅ matches backend ClassCreate
       });
   
       return result.class;
