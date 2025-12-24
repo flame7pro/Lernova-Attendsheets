@@ -1252,8 +1252,6 @@ async def verify_class_exists(class_id: str):
             detail="Failed to verify class",
         )
 
-
-
 # ==================== CLASS ENDPOINTS ====================
 @app.get("/classes")
 async def get_classes(email: str = Depends(verify_token)):
@@ -1310,6 +1308,28 @@ async def delete_class(class_id: str, email: str = Depends(verify_token)):
 
     return {"success": True, "message": "Class deleted successfully"}
 
+@app.put("/classes/{class_id}")
+async def update_class_endpoint(
+    class_id: str,
+    data: ClassCreate,
+    email: str = Depends(verify_token),
+):
+    user = db.get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    updated = db.update_class(
+        class_id=class_id,
+        teacher_id=user["id"],
+        name=data.name,
+        thresholds=data.thresholds,
+        custom_columns=data.custom_columns,
+    )
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    return {"success": True, "class": updated}
 
 # ==================== CONTACT ENDPOINT ====================
 
